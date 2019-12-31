@@ -1,0 +1,176 @@
+- name: create the {{ cluster_name }} cluster
+  gcp_container_cluster:
+    name: "{{ cluster_name }}"
+    initial_node_count: "{{ initial_node_count }}"
+    master_auth:
+      # client_certificate_config:
+      #   issue_client_certificate: yes
+      username: "{{ cluster_admin_user }}"
+      password: "{{ cluster_admin_password }}"
+    node_config:
+      machine_type: "{{ node_machine_type }}"
+      disk_size_gb: "{{ disk_size_gb }}"
+      tags:
+        - 'ood-k8s'
+    location: "{{ zone }}"
+    project: "{{ gcp_project }}"
+    state: present
+    network: "ood-network"
+    monitoring_service: "{{ monitoring_service }}"
+  register: gke_details
+
+- name: create {{ cluster_name }}'s node pool
+  gcp_container_node_pool:
+    name: "{{ cluster_name }}-node-pool"
+    initial_node_count: "{{ initial_node_count }}"
+    cluster: "{{ gke_details }}"
+    location: "{{ zone }}"
+    project: "{{ gcp_project }}"
+    state: present
+
+- set_fact:
+    gke_ca_cert: "{{ gke_details | json_query('masterAuth.clusterCaCertificate') | b64decode }}"
+    client_cert: "{{ gke_details | json_query('masterAuth.clientCertificate') | b64decode }}"
+    client_key: "{{ gke_details | json_query('masterAuth.clientKey') | b64decode }}"
+    gke_server: "https://{{ gke_details | json_query('endpoint') }}"
+    ca_cert_file: "/home/jeff/.cache/gke/gke.crt"
+    client_cert_file: "/home/jeff/.cache/gke/client.crt"
+    key_file: "/home/jeff/.cache/gke/client.key"
+    k8s_user: "ansible"
+
+- name: write certs
+  copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.dest }}"
+  loop:
+  - { content: "{{ gke_ca_cert }}" , dest: "{{ ca_cert_file }}" }
+  # - { content: "{{ client_cert }}" , dest: "{{ client_cert_file }}" }
+  # - { content: "{{ client_key }}" , dest: "{{ key_file }}" }
+
+# yes we're writing this password to a plain text file, can't seem to get the k8s module to work without it
+- name: write kubectl creds
+  shell: "kubectl config set-credentials {{ k8s_user }} --username={{ cluster_admin_user }} --password={{ cluster_admin_password }}"
+
+- name: write kubectl cluster
+  shell: "kubectl config set-cluster {{ k8s_user }} --server={{ gke_server }} --certificate-authority={{ ca_cert_file }}"
+
+- name: write ansible context
+  shell: "kubectl config set-context {{ k8s_user }} --user={{ k8s_user }} --cluster={{ k8s_user }}"
+
+- name: Create the namespaces
+  k8s:
+    name: "{{ item }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+    context: "{{ k8s_user }}"
+  loop: "{{ users }}"
+
+- name: create the ood-initializer roles in the namespaces 
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        namespace: "{{ item }}"
+        name: ood-initializer
+      rules:
+      - apiGroups: [""]
+        resources: ["secrets"]
+        verbs: ["get", "create", "update", "patch"]
+      - apiGroups: [""]
+        resources: ["services", "pods"]
+        verbs: ["get"]
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["update", "get", "patch"]
+  loop: "{{ users }}"
+
+- name: create the ood-user role
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: ood-user
+      rules:
+      - apiGroups: [""]
+        resources: ["services", "pods", "configmaps", "secrets"]
+        verbs: ["get", "create", "update", "patch", "delete"]
+
+- name: create the pod-reader cluster role
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        # "namespace" omitted since ClusterRoles are not namespaced
+        name: pod-reader
+      rules:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "watch", "list"]
+
+- name: apply pod-reader to all users
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: pod-reader
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "pod-reader"
+      subjects:
+        - kind: User
+          name: "{{ sa_prefix }}-{{ item }}@{{ gcp_sa_acct }}"
+  loop: "{{ users }}"
+
+- name: apply ood-initializer to service accounts
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        namespace: "{{ item }}"
+        name: "{{ item }}-ood-initializer"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: "ood-initializer"
+      subjects:
+        - kind: ServiceAccount
+          name: "default"
+          namespace: "{{ item }}"
+  loop: "{{ users }}"
+
+- name: apply ood-user to all users in their namespace
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        namespace: "{{ item }}"
+        name: "{{ item }}-ood-user"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "ood-user"
+      subjects:
+        - kind: User
+          name: "{{ sa_prefix }}-{{ item }}@{{ gcp_sa_acct }}"
+          namespace: "{{ item }}"
+  loop: "{{ users }}"
