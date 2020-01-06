@@ -59,7 +59,7 @@
 
 - name: Create the namespaces
   k8s:
-    name: "{{ item }}"
+    name: "{{ item.name }}"
     api_version: v1
     kind: Namespace
     state: present
@@ -74,7 +74,7 @@
       apiVersion: rbac.authorization.k8s.io/v1
       kind: Role
       metadata:
-        namespace: "{{ item }}"
+        namespace: "{{ item.name }}"
         name: ood-initializer
       rules:
       - apiGroups: [""]
@@ -132,7 +132,7 @@
         name: "pod-reader"
       subjects:
         - kind: User
-          name: "{{ sa_prefix }}-{{ item }}@{{ gcp_sa_acct }}"
+          name: "{{ sa_prefix }}-{{ item.name }}@{{ gcp_sa_acct }}"
   loop: "{{ users }}"
 
 - name: apply ood-initializer to service accounts
@@ -143,8 +143,8 @@
       apiVersion: rbac.authorization.k8s.io/v1
       kind: RoleBinding
       metadata:
-        namespace: "{{ item }}"
-        name: "{{ item }}-ood-initializer"
+        namespace: "{{ item.name }}"
+        name: "{{ item.name }}-ood-initializer"
       roleRef:
         apiGroup: rbac.authorization.k8s.io
         kind: Role
@@ -152,7 +152,7 @@
       subjects:
         - kind: ServiceAccount
           name: "default"
-          namespace: "{{ item }}"
+          namespace: "{{ item.name }}"
   loop: "{{ users }}"
 
 - name: apply ood-user to all users in their namespace
@@ -163,14 +163,14 @@
       apiVersion: rbac.authorization.k8s.io/v1
       kind: ClusterRoleBinding
       metadata:
-        namespace: "{{ item }}"
-        name: "{{ item }}-ood-user"
+        namespace: "{{ item.name }}"
+        name: "{{ item.name }}-ood-user"
       roleRef:
         apiGroup: rbac.authorization.k8s.io
         kind: ClusterRole
         name: "ood-user"
       subjects:
         - kind: User
-          name: "{{ sa_prefix }}-{{ item }}@{{ gcp_sa_acct }}"
-          namespace: "{{ item }}"
+          name: "{{ sa_prefix }}-{{ item.name }}@{{ gcp_sa_acct }}"
+          namespace: "{{ item.name }}"
   loop: "{{ users }}"
