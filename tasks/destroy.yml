@@ -1,7 +1,7 @@
 - name: destroy the {{ cluster_name }} cluster
   gcp_container_cluster:
     name: "{{ cluster_name }}"
-    location: "{{ zone }}"
+    location: "{{ region_zone }}"
     project: "{{ gcp_project }}"
     auth_kind: serviceaccount
     service_account_file: "{{ service_account_file }}"

@@ -1,3 +1,8 @@
+- name: include gcp-vm defaults
+  include_vars:
+    dir: ../../gcp-vm/defaults
+  tags: ['always']
+
 - include: create.yml
   tags: [ 'create' ]
   
