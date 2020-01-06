@@ -12,7 +12,7 @@
       disk_size_gb: "{{ disk_size_gb }}"
       tags:
         - 'ood-k8s'
-    location: "{{ zone }}"
+    location: "{{ region_zone }}"
     project: "{{ gcp_project }}"
     state: present
     network: "ood-network"
@@ -24,7 +24,7 @@
     name: "{{ cluster_name }}-node-pool"
     initial_node_count: "{{ initial_node_count }}"
     cluster: "{{ gke_details }}"
-    location: "{{ zone }}"
+    location: "{{ region_zone }}"
     project: "{{ gcp_project }}"
     state: present
 
