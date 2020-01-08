@@ -15,7 +15,7 @@
     location: "{{ region_zone }}"
     project: "{{ gcp_project }}"
     state: present
-    network: "ood-network"
+    network: "{{ network_name }}"
     monitoring_service: "{{ monitoring_service }}"
   register: gke_details
 
@@ -66,6 +66,56 @@
     context: "{{ k8s_user }}"
   loop: "{{ users }}"
 
+
+# need to set jinja2_native=true in your ansible.cfg for this one to work!
+- name: create the user pod security policies
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: extensions/v1beta1
+      kind: PodSecurityPolicy
+      metadata:
+        name: "{{ item.name }}-psp"
+        annotations:
+          seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
+          apparmor.security.beta.kubernetes.io/allowedProfileNames: 'runtime/default'
+          seccomp.security.alpha.kubernetes.io/defaultProfileName:  'runtime/default'
+          apparmor.security.beta.kubernetes.io/defaultProfileName:  'runtime/default'
+      spec:
+        # Required to prevent escalations to root.
+        privileged: false
+        allowPrivilegeEscalation: false
+        hostNetwork: false
+        hostIPC: false
+        hostPID: false
+        supplementalGroups:
+          rule: RunAsAny
+        runAsUser:
+          # Run as your own uid
+          rule: 'MustRunAs'
+          ranges:
+          - min: "{{ item.uid | int }}"
+            max: "{{ item.uid | int }}"
+        seLinux:
+          # This policy assumes the nodes are using AppArmor rather than SELinux.
+          rule: 'RunAsAny'
+        supplementalGroups:
+          rule: 'MustRunAs'
+          ranges:
+          # Forbid adding the root group.
+          - min: 1
+            max: 65535
+        fsGroup:
+          rule: 'MustRunAs'
+          ranges:
+          # Forbid adding the root group.
+          - min: 1
+            max: 65535
+        volumes:
+        - '*'
+  loop: "{{ users }}"
+
 - name: create the ood-initializer roles in the namespaces 
   k8s:
     state: present
@@ -86,6 +136,23 @@
       - apiGroups: [""]
         resources: ["configmaps"]
         verbs: ["update", "get", "patch"]
+  loop: "{{ users }}"
+
+- name: create the roles for using the pod security policies'
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      kind: Role
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: "{{ item.name }}-psp-role"
+        namespace: "{{ item.name }}"
+      rules:
+      - apiGroups: [ "extensions" ]
+        resources: [ "podsecuritypolicies" ]
+        resourceNames: [ "{{ item.name }}-psp" ]
+        verbs: [ "use" ]
   loop: "{{ users }}"
 
 - name: create the ood-user role
@@ -173,4 +240,25 @@
         - kind: User
           name: "{{ sa_prefix }}-{{ item.name }}@{{ gcp_sa_acct }}"
           namespace: "{{ item.name }}"
+  loop: "{{ users }}"
+
+- name: apply the pod security policy roles to all the users
+  k8s:
+    state: present
+    context: "{{ k8s_user }}"
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: "{{ item.name }}-psp-rolebinding"
+        namespace: "{{ item.name }}"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: "{{ item.name }}-psp-role"
+      subjects:
+      - apiGroup: rbac.authorization.k8s.io
+        kind: User
+        name: "{{ sa_prefix }}-{{ item.name }}@{{ gcp_sa_acct }}"
+        namespace: "{{ item.name }}"
   loop: "{{ users }}"
