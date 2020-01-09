@@ -89,14 +89,18 @@
         hostNetwork: false
         hostIPC: false
         hostPID: false
-        supplementalGroups:
-          rule: RunAsAny
         runAsUser:
           # Run as your own uid
           rule: 'MustRunAs'
           ranges:
           - min: "{{ item.uid | int }}"
             max: "{{ item.uid | int }}"
+        runAsGroup:
+          # Run as your own gid
+          rule: 'MustRunAs'
+          ranges:
+          - min: "{{ item.gid | int }}"
+            max: "{{ item.gid | int }}"
         seLinux:
           # This policy assumes the nodes are using AppArmor rather than SELinux.
           rule: 'RunAsAny'
