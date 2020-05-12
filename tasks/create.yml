@@ -36,7 +36,7 @@
     ca_cert_file: "/home/jeff/.cache/gke/gke.crt"
     client_cert_file: "/home/jeff/.cache/gke/client.crt"
     key_file: "/home/jeff/.cache/gke/client.key"
-    k8s_user: "ansible"
+    k8s_user: "ansible-{{ cluster_name }}"
 
 - name: write certs
   copy:
@@ -49,7 +49,7 @@
 
 # yes we're writing this password to a plain text file, can't seem to get the k8s module to work without it
 - name: write kubectl creds
-  shell: "kubectl config set-credentials {{ k8s_user }} --username={{ cluster_admin_user }} --password={{ cluster_admin_password }}"
+  shell: "kubectl config set-credentials {{ k8s_user }} --username={{ cluster_admin_user }} --password='{{ cluster_admin_password }}'"
 
 - name: write kubectl cluster
   shell: "kubectl config set-cluster {{ k8s_user }} --server={{ gke_server }} --certificate-authority={{ ca_cert_file }}"

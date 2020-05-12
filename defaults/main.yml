@@ -9,4 +9,9 @@ monitoring_service: none
 # gcp_project: need-to-give-at-runtime
 # service_account_file: need-to-give-at-runtime
 
+gke_version: "1.15.11-gke.12"
+network_name: "default"
+sa_prefix: "gke-sa"
+gcp_sa_acct: "{{ gcp_project }}.iam.gserviceaccount.com"
+
 
